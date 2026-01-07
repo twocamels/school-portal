@@ -6,7 +6,7 @@ import Papa from 'papaparse';
 import { 
   Users, BookOpen, GraduationCap, LogOut, UserPlus, 
   Trash2, Key, Plus, RefreshCw, Edit, Settings, BookPlus, 
-  UploadCloud, Loader2, Download, FileSpreadsheet
+  UploadCloud, Loader2, Download, FileSpreadsheet, ShieldCheck, BarChart3
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -69,8 +69,8 @@ const LoginScreen = ({ onLogin }: { onLogin: (u: User) => void }) => {
           <div className="mx-auto bg-green-700 w-16 h-16 rounded-full flex items-center justify-center mb-4">
             <GraduationCap className="text-white w-8 h-8" />
           </div>
-          <CardTitle className="text-2xl">Elite Schools Portal v13</CardTitle>
-          <CardDescription>Stable Production Build</CardDescription>
+          <CardTitle className="text-2xl">Elite Schools Portal</CardTitle>
+          <CardDescription>Version 15: Complete Feature Set</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -81,6 +81,56 @@ const LoginScreen = ({ onLogin }: { onLogin: (u: User) => void }) => {
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Sign In"}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+const StudentDashboard = ({ user, classes, subjects }: { user: User, classes: Class[], subjects: Subject[] }) => {
+  const [grades, setGrades] = useState<Grade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const currentClass = classes.find(c => c.id === user.current_class_id);
+
+  useEffect(() => {
+    const fetchGrades = async () => {
+      const { data } = await supabase.from('grades').select('*').eq('student_id', user.id).eq('session', CURRENT_SESSION).eq('term', CURRENT_TERM);
+      if (data) setGrades(data);
+      setLoading(false);
+    };
+    fetchGrades();
+  }, [user.id]);
+
+  if (loading) return <div className="p-8">Loading academic record...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-xs">Class</CardTitle></CardHeader><CardContent><div className="text-lg font-bold">{currentClass?.name || "Unassigned"}</div></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-xs">Term</CardTitle></CardHeader><CardContent><div className="text-lg font-bold">{CURRENT_TERM}</div></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-xs">Average</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-blue-600">
+          {grades.length > 0 ? (grades.reduce((a, b) => a + b.score, 0) / grades.length).toFixed(1) : 0}%
+        </div></CardContent></Card>
+      </div>
+      <Card>
+        <CardHeader><CardTitle>Report Sheet</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader><TableRow><TableHead>Subject</TableHead><TableHead>Score</TableHead><TableHead>Grade</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {currentClass?.subjects?.map(subId => {
+                const grade = grades.find(g => g.subject_id === subId);
+                let letter = grade ? (grade.score >= 75 ? "A1" : grade.score >= 50 ? "C6" : "F9") : "-";
+                return (
+                  <TableRow key={subId}>
+                    <TableCell>{getSubjectName(subId, subjects)}</TableCell>
+                    <TableCell>{grade ? grade.score : "-"}</TableCell>
+                    <TableCell><Badge variant="outline">{letter}</Badge></TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>
@@ -265,6 +315,8 @@ const AdminDashboard = ({
   const [newTeacherSub, setNewTeacherSub] = useState('');
   const [assignTeacherId, setAssignTeacherId] = useState('');
   const [assignClassId, setAssignClassId] = useState('');
+  const [extraTeacherId, setExtraTeacherId] = useState('');
+  const [extraSubjectId, setExtraSubjectId] = useState('');
   const [baseClass, setBaseClass] = useState('');
   const [armLetter, setArmLetter] = useState('');
   const [newSubName, setNewSubName] = useState('');
@@ -330,264 +382,18 @@ const AdminDashboard = ({
     refreshData();
   };
 
+  const handleAssignExtraSubject = async () => {
+    if(!extraTeacherId || !extraSubjectId) return;
+    const teacher = data.users.find(u => u.id === extraTeacherId);
+    if (!teacher) return;
+    const currentExtras = teacher.additional_subject_ids || [];
+    const newExtras = [...new Set([...currentExtras, extraSubjectId])];
+    await supabase.from('users').update({ additional_subject_ids: newExtras }).eq('id', extraTeacherId);
+    alert("Subject Assigned");
+    refreshData();
+  };
+
   const handleAddClass = async () => {
     if(!baseClass || !armLetter) return;
     const name = `${baseClass}${armLetter}`;
-    const level = baseClass.includes('Primary') ? 'Primary' : baseClass.includes('JSS') ? 'Junior' : 'Senior';
-    const sibling = data.classes.find(c => c.base === baseClass);
-    const subjects = sibling ? sibling.subjects : [];
-    await supabase.from('classes').insert({ name, base: baseClass, level, subjects });
-    refreshData();
-  };
-
-  const handleAddSubject = async () => {
-    if(!newSubName || !newSubClass) return;
-    const { data: subData } = await supabase.from('subjects').insert({ name: newSubName }).select().single();
-    if(!subData) return;
-    const targetClassObj = data.classes.find(c => c.id === newSubClass);
-    if (!targetClassObj) return;
-    const classesToUpdate = addToAllArms ? data.classes.filter(c => c.base === targetClassObj.base) : [targetClassObj];
-    for (const cls of classesToUpdate) {
-      const currentSubjects = cls.subjects || [];
-      await supabase.from('classes').update({ subjects: [...currentSubjects, subData.id] }).eq('id', cls.id);
-    }
-    refreshData();
-    alert("Subject Added");
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-         <Card className="bg-green-50"><CardContent className="pt-6 font-bold text-2xl text-green-700">{data.users.filter(u => u.role === 'student').length} Students</CardContent></Card>
-         <Card className="bg-blue-50"><CardContent className="pt-6 font-bold text-2xl text-blue-700">{data.users.filter(u => u.role === 'teacher').length} Staff</CardContent></Card>
-         <Card className="bg-orange-50"><CardContent className="pt-6 font-bold text-2xl text-orange-700">{data.classes.length} Classes</CardContent></Card>
-      </div>
-
-      <Tabs defaultValue="students">
-        <TabsList>
-          <TabsTrigger value="students">Students</TabsTrigger>
-          <TabsTrigger value="staff">Staff Management</TabsTrigger>
-          <TabsTrigger value="classes">Classes & Subjects</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="students">
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <CardTitle>Student Registry</CardTitle>
-              <div className="flex gap-2">
-                <Dialog>
-                  <DialogTrigger asChild><Button variant="outline"><UserPlus className="w-4 h-4 mr-2" /> Manual Register</Button></DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader><DialogTitle>Register Student</DialogTitle></DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2"><Label>Full Name</Label><Input value={newStudentName} onChange={e => setNewStudentName(e.target.value)} /></div>
-                      <div className="space-y-2"><Label>Class</Label>
-                        <Select value={newStudentClass} onValueChange={setNewStudentClass}>
-                          <SelectTrigger><SelectValue placeholder="Select Class" /></SelectTrigger>
-                          <SelectContent>{data.classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <DialogFooter><Button onClick={handleAddStudent}>Register</Button></DialogFooter>
-                  </DialogContent>
-                </Dialog>
-                <div className="relative">
-                  <input type="file" id="csvStudent" className="hidden" accept=".csv" onChange={handleBulkStudentUpload} disabled={uploading} />
-                  <Button asChild disabled={uploading} className="bg-blue-600 hover:bg-blue-700">
-                    <label htmlFor="csvStudent" className="cursor-pointer">{uploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />} Bulk Upload</label>
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] overflow-y-auto border rounded">
-                <Table>
-                  <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Class</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {data.users.filter(u => u.role === 'student').map(s => (
-                      <TableRow key={s.id}>
-                        <TableCell>{s.name}</TableCell>
-                        <TableCell><Badge variant="outline">{data.classes.find(c => c.id === s.current_class_id)?.name}</Badge></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="staff">
-          <Card>
-             <CardHeader className="flex flex-row justify-between">
-               <CardTitle>Staff Room</CardTitle>
-               <div className="flex gap-2">
-                 <Dialog>
-                    <DialogTrigger asChild><Button><UserPlus className="w-4 h-4 mr-2" /> Add Teacher</Button></DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader><DialogTitle>New Teacher</DialogTitle></DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2"><Label>Name</Label><Input value={newTeacherName} onChange={e => setNewTeacherName(e.target.value)} /></div>
-                        <div className="space-y-2"><Label>Primary Subject</Label>
-                          <Select value={newTeacherSub} onValueChange={setNewTeacherSub}>
-                             <SelectTrigger><SelectValue /></SelectTrigger>
-                             <SelectContent>{data.subjects.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <DialogFooter><Button onClick={handleAddTeacher}>Add</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                  <Dialog>
-                    <DialogTrigger asChild><Button variant="outline"><Settings className="w-4 h-4 mr-2" /> Assign Form Master</Button></DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader><DialogTitle>Assign Form Master</DialogTitle></DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2"><Label>Teacher</Label>
-                          <Select value={assignTeacherId} onValueChange={setAssignTeacherId}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>{data.users.filter(u => u.role === 'teacher').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2"><Label>Class</Label>
-                           <Select value={assignClassId} onValueChange={setAssignClassId}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>{data.classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <DialogFooter><Button onClick={handleAssignFormMaster}>Assign</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-               </div>
-             </CardHeader>
-             <CardContent>
-               <Table>
-                 <TableHeader><TableRow><TableHead>Teacher</TableHead><TableHead>Role</TableHead></TableRow></TableHeader>
-                 <TableBody>
-                   {data.users.filter(u => u.role === 'teacher').map(t => (
-                     <TableRow key={t.id}>
-                       <TableCell>{t.name}</TableCell>
-                       <TableCell>{t.managed_class_id ? <Badge>Form Master: {data.classes.find(c => c.id === t.managed_class_id)?.name}</Badge> : "Teacher"}</TableCell>
-                     </TableRow>
-                   ))}
-                 </TableBody>
-               </Table>
-             </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="classes">
-           <Card>
-             <CardHeader className="flex flex-row justify-between">
-                <CardTitle>Class Configuration</CardTitle>
-                <div className="flex gap-2">
-                  <Dialog>
-                    <DialogTrigger asChild><Button size="sm"><Plus className="w-4 h-4 mr-2" /> New Class Arm</Button></DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader><DialogTitle>Create Class Arm</DialogTitle></DialogHeader>
-                      <div className="py-4 space-y-4">
-                         <div className="space-y-2"><Label>Base Class</Label>
-                           <Select value={baseClass} onValueChange={setBaseClass}>
-                             <SelectTrigger><SelectValue placeholder="e.g. Primary 1" /></SelectTrigger>
-                             <SelectContent>{['Primary 1','Primary 2','Primary 3','JSS 1','JSS 2','SSS 1 Science'].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                           </Select>
-                         </div>
-                         <div className="space-y-2"><Label>Arm Letter</Label>
-                           <Select value={armLetter} onValueChange={setArmLetter}>
-                             <SelectTrigger><SelectValue placeholder="A, B, C..." /></SelectTrigger>
-                             <SelectContent>{['A','B','C','D'].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                           </Select>
-                         </div>
-                      </div>
-                      <DialogFooter><Button onClick={handleAddClass}>Create Class</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                  <Dialog>
-                    <DialogTrigger asChild><Button size="sm" variant="outline"><BookPlus className="w-4 h-4 mr-2" /> Add Subject</Button></DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader><DialogTitle>Add Subject</DialogTitle></DialogHeader>
-                      <div className="py-4 space-y-4">
-                         <div className="space-y-2"><Label>Subject Name</Label><Input value={newSubName} onChange={e => setNewSubName(e.target.value)} /></div>
-                         <div className="space-y-2"><Label>Target Class</Label>
-                           <Select value={newSubClass} onValueChange={setNewSubClass}>
-                             <SelectTrigger><SelectValue placeholder="Class" /></SelectTrigger>
-                             <SelectContent>{data.classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                           </Select>
-                         </div>
-                         <div className="flex items-center space-x-2">
-                            <Checkbox id="allArms" checked={addToAllArms} onCheckedChange={(c) => setAddToAllArms(!!c)} />
-                            <Label htmlFor="allArms">Add to all arms? (e.g. 1A, 1B, 1C)</Label>
-                         </div>
-                      </div>
-                      <DialogFooter><Button onClick={handleAddSubject}>Save Subject</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-             </CardHeader>
-             <CardContent>
-               <div className="h-[400px] overflow-y-auto">
-                 <Table>
-                   <TableHeader><TableRow><TableHead>Class</TableHead><TableHead>Subjects</TableHead></TableRow></TableHeader>
-                   <TableBody>
-                     {data.classes.sort((a,b) => a.name.localeCompare(b.name)).map(c => (
-                       <TableRow key={c.id}>
-                         <TableCell className="font-bold">{c.name}</TableCell>
-                         <TableCell className="text-xs text-slate-500">{c.subjects?.length || 0} subjects</TableCell>
-                       </TableRow>
-                     ))}
-                   </TableBody>
-                 </Table>
-               </div>
-             </CardContent>
-           </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-};
-
-// --- APP SHELL ---
-const SchoolApp = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [appData, setAppData] = useState<{ users: User[], classes: Class[], subjects: Subject[] }>({ users: [], classes: [], subjects: [] });
-  const [loading, setLoading] = useState(false);
-
-  const fetchData = async () => {
-    setLoading(true);
-    const [usersRes, classesRes, subjectsRes] = await Promise.all([
-      supabase.from('users').select('*'),
-      supabase.from('classes').select('*'),
-      supabase.from('subjects').select('*')
-    ]);
-    setAppData({ users: usersRes.data || [], classes: classesRes.data || [], subjects: subjectsRes.data || [] });
-    setLoading(false);
-  };
-
-  useEffect(() => { if (currentUser) fetchData(); }, [currentUser]);
-
-  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
-  
-  if (loading && !appData.classes.length) return <div className="h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-green-700" /></div>;
-
-  return (
-    <div className="min-h-screen bg-slate-50 pb-10">
-       <div className="bg-white border-b sticky top-0 z-10 shadow-sm">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2"><GraduationCap className="text-green-700 w-6 h-6" /><span className="font-bold text-lg text-green-900 hidden md:inline">Elite Schools v13</span></div>
-          <div className="flex items-center gap-4">
-             <div className="text-right hidden md:block"><div className="text-sm font-bold">{currentUser.name}</div><div className="text-xs text-slate-500 capitalize">{currentUser.role}</div></div>
-            <Button variant="ghost" size="sm" onClick={() => setCurrentUser(null)}><LogOut className="w-5 h-5 text-red-500" /></Button>
-          </div>
-        </div>
-      </div>
-      <div className="container mx-auto px-4 py-8">
-        {currentUser.role === 'teacher' && <TeacherDashboard user={currentUser} classes={appData.classes} subjects={appData.subjects} />}
-        {currentUser.role === 'admin' && <AdminDashboard data={appData} refreshData={fetchData} />}
-        {currentUser.role === 'student' && <div className="p-8 text-center">Student View Loaded</div>}
-      </div>
-    </div>
-  );
-};
-
-export default SchoolApp;
+    const level = baseClass
